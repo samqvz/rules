@@ -5,9 +5,9 @@ import yaml
 
 # 上游规则源 (可根据需要替换为你喜欢的上游)
 UPSTREAM_URLS = {
-    "proxy": "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy.txt",
-    "direct": "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/direct.txt",
-    "reject": "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/reject.txt"
+    "proxy": "https://github.com/Loyalsoldier/clash-rules/releases/download/202603232259/proxy.txt",
+    "direct": "https://github.com/Loyalsoldier/clash-rules/releases/download/202603232259/direct.txt",
+    "reject": "https://github.com/Loyalsoldier/clash-rules/releases/download/202603232259/reject.txt"
 }
 
 def fetch_upstream(url):
