@@ -1,7 +1,7 @@
-DOMAIN,www.jyyouxi.com
-DOMAIN,m.jyyouxi.com
-DOMAIN,www.chinagenetic.com
-DOMAIN,m.chinagenetic.com
-DOMAIN,ppvod01.kqgfbs.com
-DOMAIN,ppvod011.blbtgg.com
-DOMAIN,obs.3688baihuo.com
+www.jyyouxi.com
+m.jyyouxi.com
+www.chinagenetic.com
+m.chinagenetic.com
+ppvod01.kqgfbs.com
+ppvod011.blbtgg.com
+obs.3688baihuo.com
