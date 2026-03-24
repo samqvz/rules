@@ -1,1 +1,1 @@
-DOMAIN,browserleaks.com
+browserleaks.com
