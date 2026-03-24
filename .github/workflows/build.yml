@@ -1,0 +1,61 @@
+name: Build and Release Rulesets
+
+on:
+  schedule:
+    - cron: "0 22 * * *" # 每天 UTC 22:00 (北京/台北时间 06:00) 触发
+  workflow_dispatch: # 允许在 Actions 页面手动触发
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Python Dependencies
+        run: pip install pyyaml
+
+      - name: Generate YAML and JSON source files
+        run: python build.py
+
+      - name: Download Mihomo & Sing-box
+        run: |
+          # 下载 Mihomo (Meta)
+          wget -O mihomo.gz https://github.com/MetaCubeX/mihomo/releases/download/v1.18.3/mihomo-linux-amd64-v1.18.3.gz
+          gunzip mihomo.gz
+          chmod +x mihomo
+          sudo mv mihomo /usr/local/bin/
+          
+          # 下载 Sing-box
+          wget -O sing-box.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.8.10/sing-box-1.8.10-linux-amd64.tar.gz
+          tar -xzf sing-box.tar.gz
+          chmod +x sing-box-*/sing-box
+          sudo mv sing-box-*/sing-box /usr/local/bin/
+
+      - name: Compile .mrs and .srs Rulesets
+        run: |
+          for category in proxy direct reject; do
+            # 编译 Mihomo MRS
+            mihomo convert-ruleset domain yaml $category.yaml $category.mrs
+            # 编译 Sing-box SRS
+            sing-box rule-set compile --output $category.srs $category.json
+          done
+
+      - name: Create Release and Upload Assets
+        uses: ncipollo/release-action@v1
+        with:
+          tag: "latest"
+          name: "Latest Custom Rules"
+          body: "Auto-generated custom routing rules for Mihomo (.mrs) and Sing-box (.srs)."
+          allowUpdates: true
+          makeLatest: true
+          artifacts: "*.mrs,*.srs"
+          token: ${{ secrets.GITHUB_TOKEN }}
