@@ -1,8 +1,8 @@
-name: Build Ultimate Custom Rule-Sets
+name: Build Custom Rules (Domains & IPs)
 on:
   workflow_dispatch:
   schedule:
-    - cron: "30 18 * * *" # 每天定时运行 (UTC+8 早上 2:30)
+    - cron: "30 22 * * *" # 每天定时运行 (UTC+8 早上 6:30)
   push:
     branches:
       - main
@@ -22,49 +22,70 @@ jobs:
           mkdir -p singbox_json
           mkdir -p publish/mrs
           mkdir -p publish/srs
-          mkdir -p publish/geodata
           
-          # 定义构建时间
           echo "BUILDTIME=$(TZ=Asia/Shanghai date +'%Y-%m-%d %H:%M')" >> $GITHUB_ENV
 
-      - name: Download Upstream Rules (基于纯文本的极速拉取)
+      - name: Download Upstream Rules (Domains)
         run: |
-          # 核心思路：依然使用极速的纯文本拉取作为基础
+          # 下载域名规则
           curl -fsSL "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt" > download_proxy.txt
-          curl -fsSL "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/direct-list.txt" > download_direct.txt
+          curl -fsSL "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/direct-list.txt" > download_cn.txt
           curl -fsSL "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/reject-list.txt" > download_reject.txt
+          curl -fsSL "https://raw.githubusercontent.com/privacy-protection-tools/anti-AD/master/anti-ad-domains.txt" >> download_reject.txt
+          curl -fsSL "https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/apple.china.conf" > download_apple_raw.txt
           
-          # 转换为标准的 DOMAIN, DOMAIN-SUFFIX 格式
-          for file in download_*.txt; do
-              category=$(basename "$file" .txt | sed 's/download_//')
+          # 格式化通用域名规则 (proxy, cn, reject)
+          for cat in proxy cn reject; do
               awk '
                   /^full:/   { sub(/^full:/, "DOMAIN,"); print; next }
                   /^regexp:/ { sub(/^regexp:/, "DOMAIN-REGEX,"); print; next }
                   /^\w/ { print "DOMAIN-SUFFIX," $0 }
-              ' "$file" > "process/${category}.list"
+              ' "download_${cat}.txt" > "process/${cat}.list"
+          done
+          
+          # 特殊格式化 Apple-CN
+          awk -F/ '/^server=\// {print "DOMAIN-SUFFIX," $2}' download_apple_raw.txt > process/apple-cn.list
+
+      - name: Download Upstream Rules (IPs)
+        run: |
+          # 1. 下载国内 IP (cn_ip)
+          curl -fsSL "https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/cn.txt" > download_cn_ip_raw.txt
+          
+          # 2. 下载并合并主流代理服务 IP (proxy_ip)
+          > download_proxy_ip_raw.txt
+          for service in telegram google twitter facebook netflix; do
+              curl -fsSL "https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/${service}.txt" >> download_proxy_ip_raw.txt
+          done
+          
+          # 格式化 IP 规则 (判断是否包含冒号来区分 IPv4 和 IPv6)
+          for cat in cn_ip proxy_ip; do
+              awk '/:/ {print "IP-CIDR6," $0; next} {print "IP-CIDR," $0}' "download_${cat}_raw.txt" > "process/${cat}.list"
           done
 
-      - name: Merge Custom Rules (合并你的自定义增减)
+      - name: Merge Custom Rules (合并自定义增减)
         run: |
-          # 确保如果 custom 文件不存在也不会报错
           mkdir -p custom/add custom/remove
-          touch custom/add/proxy.list custom/remove/proxy.list
-          touch custom/add/direct.list custom/remove/direct.list
-          touch custom/add/reject.list custom/remove/reject.list
-
-          # 核心逻辑：合并上游与本地 Add -> 利用 grep -vxF 剔除 Remove
-          for category in proxy direct reject; do
+          
+          # 遍历所有 6 个分类
+          for category in cn proxy apple-cn reject cn_ip proxy_ip; do
+              # 如果本地没有建文件，自动 touch 避免报错
+              touch "custom/add/${category}.list" "custom/remove/${category}.list"
+              
+              # 合并上游与 Add，利用 grep 剔除 Remove
               cat "process/${category}.list" "custom/add/${category}.list" | \
               grep -vxF -f "custom/remove/${category}.list" > "process/${category}_final.list"
           done
 
       - name: Deduplicate and Sort (调用去重脚本)
         run: |
-          # 假设你的去重脚本放在 scripts/ruleset_process.sh
           source scripts/ruleset_process.sh
-          
           for file in process/*_final.list ; do
-              format_ruleset_no_cidr "${file}" | domain_dedupe | ruleset_sort > tmp.list && mv tmp.list "${file}"
+              # 只有域名规则需要过 domain_dedupe，IP 规则直接 sort 即可
+              if [[ "$file" == *"_ip_final.list" ]]; then
+                  ruleset_sort "${file}" > tmp.list && mv tmp.list "${file}"
+              else
+                  format_ruleset_no_cidr "${file}" | domain_dedupe | ruleset_sort > tmp.list && mv tmp.list "${file}"
+              fi
           done
 
       - name: Generate Sing-box JSON 
@@ -90,6 +111,7 @@ jobs:
                       if (!regex++) { if (NR > 1) printf "\n      ],\n"; printf "      \"domain_regex\": [\n        %s", $2; }
                       else { printf ",\n        %s", $2; }
                   } else if ($1 == "IP-CIDR" || $1 == "IP-CIDR6") {
+                      # 恢复对 IP 段的 JSON 解析逻辑
                       if (!cidr++) { if (NR > 1) printf "\n      ],\n"; printf "      \"ip_cidr\": [\n        %s", $2; }
                       else { printf ",\n        %s", $2; }
                   }
@@ -97,32 +119,26 @@ jobs:
               END { printf "\n      ]\n    }\n  ]\n}\n"; }' "$file" > "singbox_json/${category}.json"
           done
 
-      - name: Download Cores & Compile MRS/SRS
+      - name: Compile SRS (Sing-box) and MRS (Mihomo)
         run: |
-          # 1. 下载 Sing-box 编译 SRS
           wget -q "https://github.com/SagerNet/sing-box/releases/download/v1.10.1/sing-box-1.10.1-linux-amd64.tar.gz" -O - | tar -zxf -
           mv sing-box-*/sing-box ./sing-box && chmod +x ./sing-box
           
-          for file in singbox_json/*.json ; do
-              ./sing-box rule-set compile --output "publish/srs/$(basename "${file%.json}.srs")" "${file}"
-          done
-
-          # 2. 下载 Mihomo 编译 MRS
           mihomo_version=$(curl -fsSL https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha/version.txt)
           wget -q "https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha/mihomo-linux-amd64-v3-${mihomo_version}.gz" -O - | gzip -d > ./mihomo
           chmod +x ./mihomo
-          
-          for file in process/*_final.list ; do
-              category=$(basename "$file" _final.list)
-              ./mihomo convert-ruleset domain text "${file}" "publish/mrs/${category}.mrs"
-          done
 
-      - name: Fetch Global GeoData (获取全球 IP/Domain 数据库，借鉴新仓库)
-        run: |
-          # 借用新仓库的思路，直接下载现成的、最权威的全局数据库作为补充
-          wget https://github.com/SagerNet/sing-geoip/releases/latest/download/geoip.db -O publish/geodata/geoip.db
-          wget https://github.com/SagerNet/sing-geosite/releases/latest/download/geosite.db -O publish/geodata/geosite.db
-          wget https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geoip.metadb -O publish/geodata/geoip.metadb
+          for category in cn proxy apple-cn reject cn_ip proxy_ip; do
+              # 编译 Sing-box SRS
+              ./sing-box rule-set compile --output "publish/srs/${category}.srs" "singbox_json/${category}.json"
+              
+              # 编译 Mihomo MRS：注意区分 domain 和 ipcidr 指令
+              if [[ "$category" == *"_ip" ]]; then
+                  ./mihomo convert-ruleset ipcidr text "process/${category}_final.list" "publish/mrs/${category}.mrs"
+              else
+                  ./mihomo convert-ruleset domain text "process/${category}_final.list" "publish/mrs/${category}.mrs"
+              fi
+          done
 
       - name: Git Push Assets to "release" Branch
         run: |
