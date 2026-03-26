@@ -2,7 +2,7 @@ name: Build Custom Rules (Domains & IPs)
 on:
   workflow_dispatch:
   schedule:
-    - cron: "30 22 * * *" # 每天定时运行 (UTC+8 早上 6:30)
+    - cron: "30 18 * * *" # 每天定时运行 (UTC+8 早上 2:30)
   push:
     branches:
       - main
@@ -23,21 +23,19 @@ jobs:
         run: |
           mkdir -p process
           mkdir -p singbox_json
-          mkdir -p publish/mrs
-          mkdir -p publish/srs
+          mkdir -p publish/clash
+          mkdir -p publish/sing
           
           echo "BUILDTIME=$(TZ=Asia/Shanghai date +'%Y-%m-%d %H:%M')" >> $GITHUB_ENV
 
       - name: Download Upstream Rules (Domains)
         run: |
-          # 下载域名规则
           curl -fsSL "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt" > download_proxy.txt
           curl -fsSL "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/direct-list.txt" > download_cn.txt
           curl -fsSL "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/reject-list.txt" > download_reject.txt
           curl -fsSL "https://raw.githubusercontent.com/privacy-protection-tools/anti-AD/master/anti-ad-domains.txt" >> download_reject.txt
           curl -fsSL "https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/apple.china.conf" > download_apple_raw.txt
           
-          # 格式化通用域名规则 (proxy, cn, reject)
           for cat in proxy cn reject; do
               awk '
                   /^full:/   { sub(/^full:/, "DOMAIN,"); print; next }
@@ -46,44 +44,41 @@ jobs:
               ' "download_${cat}.txt" > "process/${cat}.list"
           done
           
-          # 特殊格式化 Apple-CN
           awk -F/ '/^server=\// {print "DOMAIN-SUFFIX," $2}' download_apple_raw.txt > process/apple-cn.list
 
       - name: Download Upstream Rules (IPs)
         run: |
-          # 1. 下载国内 IP (cn_ip)
           curl -fsSL "https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/cn.txt" > download_cn_ip_raw.txt
           
-          # 2. 下载并合并主流代理服务 IP (proxy_ip)
           > download_proxy_ip_raw.txt
           for service in telegram google twitter facebook netflix; do
               curl -fsSL "https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/${service}.txt" >> download_proxy_ip_raw.txt
           done
           
-          # 格式化 IP 规则 (判断是否包含冒号来区分 IPv4 和 IPv6)
           for cat in cn_ip proxy_ip; do
               awk '/:/ {print "IP-CIDR6," $0; next} {print "IP-CIDR," $0}' "download_${cat}_raw.txt" > "process/${cat}.list"
           done
 
-      - name: Merge Custom Rules (合并自定义增减)
+      - name: Merge Custom Rules
         run: |
           mkdir -p custom/add custom/remove
           
-          # 遍历所有 6 个分类
           for category in cn proxy apple-cn reject cn_ip proxy_ip; do
-              # 如果本地没有建文件，自动 touch 避免报错
               touch "custom/add/${category}.list" "custom/remove/${category}.list"
               
-              # 合并上游与 Add，利用 grep 剔除 Remove
-              cat "process/${category}.list" "custom/add/${category}.list" | \
-              grep -vxF -f "custom/remove/${category}.list" > "process/${category}_final.list"
+              cat "process/${category}.list" "custom/add/${category}.list" > "process/${category}_temp.list"
+              
+              if [ -s "custom/remove/${category}.list" ]; then
+                  grep -vxF -f "custom/remove/${category}.list" "process/${category}_temp.list" > "process/${category}_final.list"
+              else
+                  mv "process/${category}_temp.list" "process/${category}_final.list"
+              fi
           done
 
-      - name: Deduplicate and Sort (调用去重脚本)
+      - name: Deduplicate and Sort
         run: |
           source scripts/ruleset_process.sh
           for file in process/*_final.list ; do
-              # 只有域名规则需要过 domain_dedupe，IP 规则直接 sort 即可
               if [[ "$file" == *"_ip_final.list" ]]; then
                   ruleset_sort "${file}" > tmp.list && mv tmp.list "${file}"
               else
@@ -114,7 +109,6 @@ jobs:
                       if (!regex++) { if (NR > 1) printf "\n      ],\n"; printf "      \"domain_regex\": [\n        %s", $2; }
                       else { printf ",\n        %s", $2; }
                   } else if ($1 == "IP-CIDR" || $1 == "IP-CIDR6") {
-                      # 恢复对 IP 段的 JSON 解析逻辑
                       if (!cidr++) { if (NR > 1) printf "\n      ],\n"; printf "      \"ip_cidr\": [\n        %s", $2; }
                       else { printf ",\n        %s", $2; }
                   }
@@ -122,7 +116,17 @@ jobs:
               END { printf "\n      ]\n    }\n  ]\n}\n"; }' "$file" > "singbox_json/${category}.json"
           done
 
-      - name: Compile SRS (Sing-box) and MRS (Mihomo)
+      - name: Output JSON and YAML # 导出明文格式
+        run: |
+          cp singbox_json/*.json publish/sing/
+          
+          for file in process/*_final.list; do
+              category=$(basename "$file" _final.list)
+              echo "payload:" > "publish/clash/${category}.yaml"
+              sed "s/^/  - '/; s/$/'/" "$file" >> "publish/clash/${category}.yaml"
+          done
+
+      - name: Compile SRS and MRS
         run: |
           wget -q "https://github.com/SagerNet/sing-box/releases/download/v1.10.1/sing-box-1.10.1-linux-amd64.tar.gz" -O - | tar -zxf -
           mv sing-box-*/sing-box ./sing-box && chmod +x ./sing-box
@@ -132,18 +136,16 @@ jobs:
           chmod +x ./mihomo
 
           for category in cn proxy apple-cn reject cn_ip proxy_ip; do
-              # 1. 编译 Sing-box SRS (它已经由 JSON 处理好前缀了，直接编)
-              ./sing-box rule-set compile --output "publish/srs/${category}.srs" "singbox_json/${category}.json"
+              # 编译 Sing-box SRS
+              ./sing-box rule-set compile --output "publish/sing/${category}.srs" "singbox_json/${category}.json"
               
-              # 2. 编译 Mihomo MRS (需要先剥离前缀，生成专属的纯净版 text)
+              # 编译 Mihomo MRS
               if [[ "$category" == *"_ip" ]]; then
-                  # 去掉 IP-CIDR, 和 IP-CIDR6, 前缀，去掉可能存在的 ,no-resolve 尾巴
                   awk '/^IP-CIDR6?,/ { sub(/^IP-CIDR6?,/, ""); sub(/,no-resolve$/, ""); print }' "process/${category}_final.list" > "process/${category}_mihomo.list"
-                  ./mihomo convert-ruleset ipcidr text "process/${category}_mihomo.list" "publish/mrs/${category}.mrs"
+                  ./mihomo convert-ruleset ipcidr text "process/${category}_mihomo.list" "publish/clash/${category}.mrs"
               else
-                  # 去掉 DOMAIN, 前缀；把 DOMAIN-SUFFIX, 换成 Mihomo 认识的 +. 泛域名写法
                   awk '/^DOMAIN,|^DOMAIN-SUFFIX,/ { sub(/^DOMAIN-SUFFIX,/, "+."); sub(/^DOMAIN,/, ""); print }' "process/${category}_final.list" > "process/${category}_mihomo.list"
-                  ./mihomo convert-ruleset domain text "process/${category}_mihomo.list" "publish/mrs/${category}.mrs"
+                  ./mihomo convert-ruleset domain text "process/${category}_mihomo.list" "publish/clash/${category}.mrs"
               fi
           done
 
