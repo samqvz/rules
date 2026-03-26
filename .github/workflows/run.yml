@@ -1,0 +1,137 @@
+name: Build Ultimate Custom Rule-Sets
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 18 * * *" # 每天定时运行 (UTC+8 早上 2:30)
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**/README.md"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Environment and Directories
+        run: |
+          mkdir -p process
+          mkdir -p singbox_json
+          mkdir -p publish/mrs
+          mkdir -p publish/srs
+          mkdir -p publish/geodata
+          
+          # 定义构建时间
+          echo "BUILDTIME=$(TZ=Asia/Shanghai date +'%Y-%m-%d %H:%M')" >> $GITHUB_ENV
+
+      - name: Download Upstream Rules (基于纯文本的极速拉取)
+        run: |
+          # 核心思路：依然使用极速的纯文本拉取作为基础
+          curl -fsSL "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt" > download_proxy.txt
+          curl -fsSL "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/direct-list.txt" > download_direct.txt
+          curl -fsSL "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/reject-list.txt" > download_reject.txt
+          
+          # 转换为标准的 DOMAIN, DOMAIN-SUFFIX 格式
+          for file in download_*.txt; do
+              category=$(basename "$file" .txt | sed 's/download_//')
+              awk '
+                  /^full:/   { sub(/^full:/, "DOMAIN,"); print; next }
+                  /^regexp:/ { sub(/^regexp:/, "DOMAIN-REGEX,"); print; next }
+                  /^\w/ { print "DOMAIN-SUFFIX," $0 }
+              ' "$file" > "process/${category}.list"
+          done
+
+      - name: Merge Custom Rules (合并你的自定义增减)
+        run: |
+          # 确保如果 custom 文件不存在也不会报错
+          mkdir -p custom/add custom/remove
+          touch custom/add/proxy.list custom/remove/proxy.list
+          touch custom/add/direct.list custom/remove/direct.list
+          touch custom/add/reject.list custom/remove/reject.list
+
+          # 核心逻辑：合并上游与本地 Add -> 利用 grep -vxF 剔除 Remove
+          for category in proxy direct reject; do
+              cat "process/${category}.list" "custom/add/${category}.list" | \
+              grep -vxF -f "custom/remove/${category}.list" > "process/${category}_final.list"
+          done
+
+      - name: Deduplicate and Sort (调用去重脚本)
+        run: |
+          # 假设你的去重脚本放在 scripts/ruleset_process.sh
+          source scripts/ruleset_process.sh
+          
+          for file in process/*_final.list ; do
+              format_ruleset_no_cidr "${file}" | domain_dedupe | ruleset_sort > tmp.list && mv tmp.list "${file}"
+          done
+
+      - name: Generate Sing-box JSON 
+        run: |
+          for file in process/*_final.list; do
+              category=$(basename "$file" _final.list)
+              awk -F',' '
+              BEGIN { printf "{\n  \"version\": 2,\n  \"rules\": [\n    {\n"; }
+              {
+                  if($1 == "DOMAIN-REGEX" && match($0, ",")){ $2 = substr($0, RSTART + 1); gsub(/\\/, "\\\\", $2); }
+                  sub(/^"/, "", $2); sub(/^'"'"'/, "", $2); sub(/"$/, "", $2); sub(/'"'"'$/, "", $2);
+                  $2 = "\"" $2 "\"";
+                  if ($1 == "DOMAIN") {
+                      if (!domain++) { if (NR > 1) printf "\n      ],\n"; printf "      \"domain\": [\n        %s", $2; }
+                      else { printf ",\n        %s", $2; }
+                  } else if ($1 == "DOMAIN-SUFFIX") {
+                      if (!suffix++) { if (NR > 1) printf "\n      ],\n"; printf "      \"domain_suffix\": [\n        %s", $2; }
+                      else { printf ",\n        %s", $2; }
+                  } else if ($1 == "DOMAIN-KEYWORD") {
+                      if (!keyword++) { if (NR > 1) printf "\n      ],\n"; printf "      \"domain_keyword\": [\n        %s", $2; }
+                      else { printf ",\n        %s", $2; }
+                  } else if ($1 == "DOMAIN-REGEX") {
+                      if (!regex++) { if (NR > 1) printf "\n      ],\n"; printf "      \"domain_regex\": [\n        %s", $2; }
+                      else { printf ",\n        %s", $2; }
+                  } else if ($1 == "IP-CIDR" || $1 == "IP-CIDR6") {
+                      if (!cidr++) { if (NR > 1) printf "\n      ],\n"; printf "      \"ip_cidr\": [\n        %s", $2; }
+                      else { printf ",\n        %s", $2; }
+                  }
+              }
+              END { printf "\n      ]\n    }\n  ]\n}\n"; }' "$file" > "singbox_json/${category}.json"
+          done
+
+      - name: Download Cores & Compile MRS/SRS
+        run: |
+          # 1. 下载 Sing-box 编译 SRS
+          wget -q "https://github.com/SagerNet/sing-box/releases/download/v1.10.1/sing-box-1.10.1-linux-amd64.tar.gz" -O - | tar -zxf -
+          mv sing-box-*/sing-box ./sing-box && chmod +x ./sing-box
+          
+          for file in singbox_json/*.json ; do
+              ./sing-box rule-set compile --output "publish/srs/$(basename "${file%.json}.srs")" "${file}"
+          done
+
+          # 2. 下载 Mihomo 编译 MRS
+          mihomo_version=$(curl -fsSL https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha/version.txt)
+          wget -q "https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha/mihomo-linux-amd64-v3-${mihomo_version}.gz" -O - | gzip -d > ./mihomo
+          chmod +x ./mihomo
+          
+          for file in process/*_final.list ; do
+              category=$(basename "$file" _final.list)
+              ./mihomo convert-ruleset domain text "${file}" "publish/mrs/${category}.mrs"
+          done
+
+      - name: Fetch Global GeoData (获取全球 IP/Domain 数据库，借鉴新仓库)
+        run: |
+          # 借用新仓库的思路，直接下载现成的、最权威的全局数据库作为补充
+          wget https://github.com/SagerNet/sing-geoip/releases/latest/download/geoip.db -O publish/geodata/geoip.db
+          wget https://github.com/SagerNet/sing-geosite/releases/latest/download/geosite.db -O publish/geodata/geosite.db
+          wget https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geoip.metadb -O publish/geodata/geoip.metadb
+
+      - name: Git Push Assets to "release" Branch
+        run: |
+          cd publish || exit 1
+          git init
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b release
+          git add .
+          git commit -m "Auto Build & Release on ${{ env.BUILDTIME }}"
+          git remote add origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
+          git push -f -u origin release
