@@ -121,7 +121,9 @@ jobs:
 
       - name: Compile SRS (Sing-box) and MRS (Mihomo)
         run: |
-          wget -q "https://github.com/SagerNet/sing-box/releases/download/v1.10.1/sing-box-1.10.1-linux-amd64.tar.gz" -O - | tar -zxf -
+          sing_version=$(curl -fsSL https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+          wget -q "https://github.com/SagerNet/sing-box/releases/download/v${sing_version}/sing-box-${sing_version}-linux-amd64.tar.gz" -O sing-box.tar.gz
+          tar -zxf sing-box.tar.gz
           mv sing-box-*/sing-box ./sing-box && chmod +x ./sing-box
           
           mihomo_version=$(curl -fsSL https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha/version.txt)
