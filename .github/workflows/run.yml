@@ -121,9 +121,7 @@ jobs:
 
       - name: Compile SRS (Sing-box) and MRS (Mihomo)
         run: |
-          sing_version=$(curl -fsSL https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
-          wget -q "https://github.com/SagerNet/sing-box/releases/download/v${sing_version}/sing-box-${sing_version}-linux-amd64.tar.gz" -O sing-box.tar.gz
-          tar -zxf sing-box.tar.gz
+          wget -q "https://github.com/SagerNet/sing-box/releases/download/v1.10.1/sing-box-1.10.1-linux-amd64.tar.gz" -O - | tar -zxf -
           mv sing-box-*/sing-box ./sing-box && chmod +x ./sing-box
           
           mihomo_version=$(curl -fsSL https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha/version.txt)
@@ -131,14 +129,18 @@ jobs:
           chmod +x ./mihomo
 
           for category in cn proxy apple-cn reject cn_ip proxy_ip; do
-              # 编译 Sing-box SRS
+              # 1. 编译 Sing-box SRS (它已经由 JSON 处理好前缀了，直接编)
               ./sing-box rule-set compile --output "publish/srs/${category}.srs" "singbox_json/${category}.json"
               
-              # 编译 Mihomo MRS：注意区分 domain 和 ipcidr 指令
+              # 2. 编译 Mihomo MRS (需要先剥离前缀，生成专属的纯净版 text)
               if [[ "$category" == *"_ip" ]]; then
-                  ./mihomo convert-ruleset ipcidr text "process/${category}_final.list" "publish/mrs/${category}.mrs"
+                  # 去掉 IP-CIDR, 和 IP-CIDR6, 前缀，去掉可能存在的 ,no-resolve 尾巴
+                  awk '/^IP-CIDR6?,/ { sub(/^IP-CIDR6?,/, ""); sub(/,no-resolve$/, ""); print }' "process/${category}_final.list" > "process/${category}_mihomo.list"
+                  ./mihomo convert-ruleset ipcidr text "process/${category}_mihomo.list" "publish/mrs/${category}.mrs"
               else
-                  ./mihomo convert-ruleset domain text "process/${category}_final.list" "publish/mrs/${category}.mrs"
+                  # 去掉 DOMAIN, 前缀；把 DOMAIN-SUFFIX, 换成 Mihomo 认识的 +. 泛域名写法
+                  awk '/^DOMAIN,|^DOMAIN-SUFFIX,/ { sub(/^DOMAIN-SUFFIX,/, "+."); sub(/^DOMAIN,/, ""); print }' "process/${category}_final.list" > "process/${category}_mihomo.list"
+                  ./mihomo convert-ruleset domain text "process/${category}_mihomo.list" "publish/mrs/${category}.mrs"
               fi
           done
 
