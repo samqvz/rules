@@ -150,7 +150,7 @@ jobs:
           done
 
           if [ -d "conversion" ]; then
-              for raw_file in conversion/*.json; do
+              for file in conversion/*.json; do
                   [ -e "$file" ] || continue
                   
                   filename=$(basename "$file" .json)
