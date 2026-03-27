@@ -149,16 +149,16 @@ jobs:
               fi
           done
 
-          if [ -d "conversion/raw_json" ]; then
+          if [ -d "conversion" ]; then
               for raw_file in conversion/*.json; do
-                  [ -e "$raw_file" ] || continue
+                  [ -e "$file" ] || continue
                   
-                  filename=$(basename "$raw_file" .json)
+                  filename=$(basename "$file" .json)
                   echo "正在编译独立 JSON: $filename"
                   
-                  cp "$raw_file" "publish/singbox/${filename}.json"
+                  cp "$file" "publish/singbox/${filename}.json"
                   
-                  ./sing-box rule-set compile --output "publish/singbox/${filename}.srs" "$raw_file"
+                  ./sing-box rule-set compile --output "publish/singbox/${filename}.srs" "$file"
               done
           fi
 
