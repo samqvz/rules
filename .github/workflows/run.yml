@@ -2,7 +2,7 @@ name: Build Custom Rules (Domains & IPs)
 on:
   workflow_dispatch:
   schedule:
-    - cron: "30 18 * * *" # 每天定时运行 (UTC+8 早上 2:30)
+    - cron: "30 18 * * *"
   push:
     branches:
       - main
@@ -23,8 +23,8 @@ jobs:
         run: |
           mkdir -p process
           mkdir -p singbox_json
-          mkdir -p publish/clash
-          mkdir -p publish/sing
+          mkdir -p publish/mihomo
+          mkdir -p publish/singbox
           
           echo "BUILDTIME=$(TZ=Asia/Shanghai date +'%Y-%m-%d %H:%M')" >> $GITHUB_ENV
 
@@ -61,15 +61,15 @@ jobs:
 
       - name: Merge Custom Rules
         run: |
-          mkdir -p custom/add custom/remove
+          mkdir -p add remove
           
           for category in cn proxy apple-cn reject cn_ip proxy_ip; do
-              touch "custom/add/${category}.list" "custom/remove/${category}.list"
+              touch "add/${category}.list" "remove/${category}.list"
               
-              cat "process/${category}.list" "custom/add/${category}.list" > "process/${category}_temp.list"
+              cat "process/${category}.list" "add/${category}.list" > "process/${category}_temp.list"
               
-              if [ -s "custom/remove/${category}.list" ]; then
-                  grep -vxF -f "custom/remove/${category}.list" "process/${category}_temp.list" > "process/${category}_final.list"
+              if [ -s "remove/${category}.list" ]; then
+                  grep -vxF -f "remove/${category}.list" "process/${category}_temp.list" > "process/${category}_final.list"
               else
                   mv "process/${category}_temp.list" "process/${category}_final.list"
               fi
@@ -86,7 +86,7 @@ jobs:
               fi
           done
 
-      - name: Generate Sing-box JSON 
+      - name: Generate Sing-box JSON
         run: |
           for file in process/*_final.list; do
               category=$(basename "$file" _final.list)
@@ -116,14 +116,14 @@ jobs:
               END { printf "\n      ]\n    }\n  ]\n}\n"; }' "$file" > "singbox_json/${category}.json"
           done
 
-      - name: Output JSON and YAML # 导出明文格式
+      - name: Output JSON and YAML
         run: |
-          cp singbox_json/*.json publish/sing/
+          cp singbox_json/*.json publish/singbox/
           
           for file in process/*_final.list; do
               category=$(basename "$file" _final.list)
-              echo "payload:" > "publish/clash/${category}.yaml"
-              sed "s/^/  - '/; s/$/'/" "$file" >> "publish/clash/${category}.yaml"
+              echo "payload:" > "publish/mihomo/${category}.yaml"
+              sed "s/^/  - '/; s/$/'/" "$file" >> "publish/mihomo/${category}.yaml"
           done
 
       - name: Compile SRS and MRS
@@ -137,17 +137,30 @@ jobs:
 
           for category in cn proxy apple-cn reject cn_ip proxy_ip; do
               # 编译 Sing-box SRS
-              ./sing-box rule-set compile --output "publish/sing/${category}.srs" "singbox_json/${category}.json"
+              ./sing-box rule-set compile --output "publish/singbox/${category}.srs" "singbox_json/${category}.json"
               
               # 编译 Mihomo MRS
               if [[ "$category" == *"_ip" ]]; then
                   awk '/^IP-CIDR6?,/ { sub(/^IP-CIDR6?,/, ""); sub(/,no-resolve$/, ""); print }' "process/${category}_final.list" > "process/${category}_mihomo.list"
-                  ./mihomo convert-ruleset ipcidr text "process/${category}_mihomo.list" "publish/clash/${category}.mrs"
+                  ./mihomo convert-ruleset ipcidr text "process/${category}_mihomo.list" "publish/mihomo/${category}.mrs"
               else
                   awk '/^DOMAIN,|^DOMAIN-SUFFIX,/ { sub(/^DOMAIN-SUFFIX,/, "+."); sub(/^DOMAIN,/, ""); print }' "process/${category}_final.list" > "process/${category}_mihomo.list"
-                  ./mihomo convert-ruleset domain text "process/${category}_mihomo.list" "publish/clash/${category}.mrs"
+                  ./mihomo convert-ruleset domain text "process/${category}_mihomo.list" "publish/mihomo/${category}.mrs"
               fi
           done
+
+          if [ -d "conversion/raw_json" ]; then
+              for raw_file in conversion/*.json; do
+                  [ -e "$raw_file" ] || continue
+                  
+                  filename=$(basename "$raw_file" .json)
+                  echo "正在编译独立 JSON: $filename"
+                  
+                  cp "$raw_file" "publish/singbox/${filename}.json"
+                  
+                  ./sing-box rule-set compile --output "publish/singbox/${filename}.srs" "$raw_file"
+              done
+          fi
 
       - name: Git Push Assets to "release" Branch
         run: |
