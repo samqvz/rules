@@ -117,7 +117,7 @@ jobs:
                   else if ($1 == "NETWORK") { nets[++nw] = val; }
               }
               END {
-                  printf "{\n  \"version\": 2,\n  \"rules\": [\n";
+                  printf "{\n  \"version\": 4,\n  \"rules\": [\n";
                   first = 1;
                   
                   if (d>0) { printf "%s    {\n      \"domain\": [\n", (first?"":",\n"); for(i=1;i<=d;i++) printf "        %s%s\n", domains[i], (i<d?",":""); printf "      ]\n    }"; first=0; }
@@ -149,7 +149,9 @@ jobs:
 
       - name: Compile SRS and MRS
         run: |
-          wget -q "https://github.com/SagerNet/sing-box/releases/download/v1.10.1/sing-box-1.10.1-linux-amd64.tar.gz" -O - | tar -zxf -
+          SINGBOX_LATEST=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+          echo "下载 Sing-box 最新版本: $SINGBOX_LATEST"
+          wget -q "https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_LATEST}/sing-box-${SINGBOX_LATEST}-linux-amd64.tar.gz" -O - | tar -zxf -
           mv sing-box-*/sing-box ./sing-box && chmod +x ./sing-box
           
           mihomo_version=$(curl -fsSL https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha/version.txt)
