@@ -64,6 +64,7 @@ jobs:
           mkdir -p add remove
           
           for category in cn proxy apple-cn reject cn_ip proxy_ip webrtc; do
+              touch "process/${category}.list" "add/${category}.list" "remove/${category}.list"
               touch "add/${category}.list" "remove/${category}.list"
               
               cat "process/${category}.list" "add/${category}.list" > "process/${category}_temp.list"
