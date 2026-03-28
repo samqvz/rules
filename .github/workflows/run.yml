@@ -61,10 +61,18 @@ jobs:
 
       - name: Merge Custom Rules
         run: |
-          mkdir -p add remove
+          mkdir -p add remove process
           
-          for category in cn proxy apple-cn reject cn_ip proxy_ip webrtc; do
-              touch "process/${category}.list" "add/${category}.list" "remove/${category}.list"
+          UPSTREAM_CATS="cn proxy apple-cn reject cn_ip proxy_ip"
+          CUSTOM_CATS="webrtc"
+          
+          for category in $CUSTOM_CATS; do
+              touch "process/${category}.list"
+          done
+          
+          ALL_CATS="$UPSTREAM_CATS $CUSTOM_CATS"
+          
+          for category in $ALL_CATS; do
               touch "add/${category}.list" "remove/${category}.list"
               
               cat "process/${category}.list" "add/${category}.list" > "process/${category}_temp.list"
@@ -74,6 +82,8 @@ jobs:
               else
                   mv "process/${category}_temp.list" "process/${category}_final.list"
               fi
+              
+              rm -f "process/${category}_temp.list"
           done
 
       - name: Deduplicate and Sort
