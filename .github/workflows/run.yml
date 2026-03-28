@@ -63,7 +63,7 @@ jobs:
         run: |
           mkdir -p add remove
           
-          for category in cn proxy apple-cn reject cn_ip proxy_ip; do
+          for category in cn proxy apple-cn reject cn_ip proxy_ip webrtc; do
               touch "add/${category}.list" "remove/${category}.list"
               
               cat "process/${category}.list" "add/${category}.list" > "process/${category}_temp.list"
@@ -150,7 +150,7 @@ jobs:
       - name: Compile SRS and MRS
         run: |
           SINGBOX_LATEST=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
-          echo "下载 Sing-box 最新版本: $SINGBOX_LATEST"
+          echo "Download Sing-box: $SINGBOX_LATEST"
           wget -q "https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_LATEST}/sing-box-${SINGBOX_LATEST}-linux-amd64.tar.gz" -O - | tar -zxf -
           mv sing-box-*/sing-box ./sing-box && chmod +x ./sing-box
           
@@ -158,7 +158,7 @@ jobs:
           wget -q "https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha/mihomo-linux-amd64-v3-${mihomo_version}.gz" -O - | gzip -d > ./mihomo
           chmod +x ./mihomo
 
-          for category in cn proxy apple-cn reject cn_ip proxy_ip; do
+          for category in cn proxy apple-cn reject cn_ip proxy_ip webrtc; do
               # 编译 Sing-box SRS
               ./sing-box rule-set compile --output "publish/singbox/${category}.srs" "singbox_json/${category}.json"
               
@@ -171,19 +171,6 @@ jobs:
                   ./mihomo convert-ruleset domain text "process/${category}_mihomo.list" "publish/mihomo/${category}.mrs"
               fi
           done
-
-          if [ -d "conversion" ]; then
-              for file in conversion/*.json; do
-                  [ -e "$file" ] || continue
-                  
-                  filename=$(basename "$file" .json)
-                  echo "正在编译独立 JSON: $filename"
-                  
-                  cp "$file" "publish/singbox/${filename}.json"
-                  
-                  ./sing-box rule-set compile --output "publish/singbox/${filename}.srs" "$file"
-              done
-          fi
 
       - name: Git Push Assets to "release" Branch
         run: |
