@@ -131,7 +131,7 @@ jobs:
               category=$(basename "$file" _final.list)
               awk -F',' '
               BEGIN {
-                  d=0; s=0; k=0; r=0; c=0; sc=0; asn=0; p=0; sp=0; pn=0; pp=0; nw=0;
+                  d=0; s=0; k=0; r=0; c=0; sc=0; p=0; sp=0; pn=0; pp=0; nw=0;
               }
               {
                   val = $2;
@@ -148,7 +148,6 @@ jobs:
                   else if ($1 == "DOMAIN-REGEX") { regexes[++r] = val; }
                   else if ($1 == "IP-CIDR" || $1 == "IP-CIDR6") { cidrs[++c] = val; }
                   else if ($1 == "SRC-IP-CIDR") { scidrs[++sc] = val; }
-                  else if ($1 == "IP-ASN") { asns[++asn] = val; }
                   else if ($1 == "DST-PORT") { ports[++p] = val; }
                   else if ($1 == "SRC-PORT") { sports[++sp] = val; }
                   else if ($1 == "PROCESS-NAME") { pnames[++pn] = val; }
@@ -165,7 +164,6 @@ jobs:
                   if (r>0) { printf "%s    {\n      \"domain_regex\": [\n", (first?"":",\n"); for(i=1;i<=r;i++) printf "        %s%s\n", regexes[i], (i<r?",":""); printf "      ]\n    }"; first=0; }
                   if (c>0) { printf "%s    {\n      \"ip_cidr\": [\n", (first?"":",\n"); for(i=1;i<=c;i++) printf "        %s%s\n", cidrs[i], (i<c?",":""); printf "      ]\n    }"; first=0; }
                   if (sc>0) { printf "%s    {\n      \"source_ip_cidr\": [\n", (first?"":",\n"); for(i=1;i<=sc;i++) printf "        %s%s\n", scidrs[i], (i<sc?",":""); printf "      ]\n    }"; first=0; }
-                  if (asn>0) { printf "%s    {\n      \"ip_asn\": [\n", (first?"":",\n"); for(i=1;i<=asn;i++) printf "        %s%s\n", asns[i], (i<asn?",":""); printf "      ]\n    }"; first=0; }
                   if (p>0) { printf "%s    {\n      \"port\": [\n", (first?"":",\n"); for(i=1;i<=p;i++) printf "        %s%s\n", ports[i], (i<p?",":""); printf "      ]\n    }"; first=0; }
                   if (sp>0) { printf "%s    {\n      \"source_port\": [\n", (first?"":",\n"); for(i=1;i<=sp;i++) printf "        %s%s\n", sports[i], (i<sp?",":""); printf "      ]\n    }"; first=0; }
                   if (pn>0) { printf "%s    {\n      \"process_name\": [\n", (first?"":",\n"); for(i=1;i<=pn;i++) printf "        %s%s\n", pnames[i], (i<pn?",":""); printf "      ]\n    }"; first=0; }
