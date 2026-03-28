@@ -86,34 +86,55 @@ jobs:
               fi
           done
 
-      - name: Generate Sing-box JSON
+      - name: Generate Sing-box JSON 
         run: |
           for file in process/*_final.list; do
               category=$(basename "$file" _final.list)
               awk -F',' '
-              BEGIN { printf "{\n  \"version\": 2,\n  \"rules\": [\n    {\n"; }
-              {
-                  if($1 == "DOMAIN-REGEX" && match($0, ",")){ $2 = substr($0, RSTART + 1); gsub(/\\/, "\\\\", $2); }
-                  sub(/^"/, "", $2); sub(/^'"'"'/, "", $2); sub(/"$/, "", $2); sub(/'"'"'$/, "", $2);
-                  $2 = "\"" $2 "\"";
-                  if ($1 == "DOMAIN") {
-                      if (!domain++) { if (NR > 1) printf "\n      ],\n"; printf "      \"domain\": [\n        %s", $2; }
-                      else { printf ",\n        %s", $2; }
-                  } else if ($1 == "DOMAIN-SUFFIX") {
-                      if (!suffix++) { if (NR > 1) printf "\n      ],\n"; printf "      \"domain_suffix\": [\n        %s", $2; }
-                      else { printf ",\n        %s", $2; }
-                  } else if ($1 == "DOMAIN-KEYWORD") {
-                      if (!keyword++) { if (NR > 1) printf "\n      ],\n"; printf "      \"domain_keyword\": [\n        %s", $2; }
-                      else { printf ",\n        %s", $2; }
-                  } else if ($1 == "DOMAIN-REGEX") {
-                      if (!regex++) { if (NR > 1) printf "\n      ],\n"; printf "      \"domain_regex\": [\n        %s", $2; }
-                      else { printf ",\n        %s", $2; }
-                  } else if ($1 == "IP-CIDR" || $1 == "IP-CIDR6") {
-                      if (!cidr++) { if (NR > 1) printf "\n      ],\n"; printf "      \"ip_cidr\": [\n        %s", $2; }
-                      else { printf ",\n        %s", $2; }
-                  }
+              BEGIN {
+                  d=0; s=0; k=0; r=0; c=0; sc=0; asn=0; p=0; sp=0; pn=0; pp=0; nw=0;
               }
-              END { printf "\n      ]\n    }\n  ]\n}\n"; }' "$file" > "singbox_json/${category}.json"
+              {
+                  val = $2;
+                  if($1 == "DOMAIN-REGEX" && match($0, ",")){ val = substr($0, RSTART + 1); gsub(/\\/, "\\\\", val); }
+                  
+                  if($1 != "DST-PORT" && $1 != "SRC-PORT" && $1 != "IP-ASN") {
+                      sub(/^"/, "", val); sub(/^'"'"'/, "", val); sub(/"$/, "", val); sub(/'"'"'$/, "", val);
+                      val = "\"" val "\"";
+                  }
+                  
+                  if ($1 == "DOMAIN") { domains[++d] = val; }
+                  else if ($1 == "DOMAIN-SUFFIX") { suffixes[++s] = val; }
+                  else if ($1 == "DOMAIN-KEYWORD") { keywords[++k] = val; }
+                  else if ($1 == "DOMAIN-REGEX") { regexes[++r] = val; }
+                  else if ($1 == "IP-CIDR" || $1 == "IP-CIDR6") { cidrs[++c] = val; }
+                  else if ($1 == "SRC-IP-CIDR") { scidrs[++sc] = val; }
+                  else if ($1 == "IP-ASN") { asns[++asn] = val; }
+                  else if ($1 == "DST-PORT") { ports[++p] = val; }
+                  else if ($1 == "SRC-PORT") { sports[++sp] = val; }
+                  else if ($1 == "PROCESS-NAME") { pnames[++pn] = val; }
+                  else if ($1 == "PROCESS-PATH") { ppaths[++pp] = val; }
+                  else if ($1 == "NETWORK") { nets[++nw] = val; }
+              }
+              END {
+                  printf "{\n  \"version\": 2,\n  \"rules\": [\n";
+                  first = 1;
+                  
+                  if (d>0) { printf "%s    {\n      \"domain\": [\n", (first?"":",\n"); for(i=1;i<=d;i++) printf "        %s%s\n", domains[i], (i<d?",":""); printf "      ]\n    }"; first=0; }
+                  if (s>0) { printf "%s    {\n      \"domain_suffix\": [\n", (first?"":",\n"); for(i=1;i<=s;i++) printf "        %s%s\n", suffixes[i], (i<s?",":""); printf "      ]\n    }"; first=0; }
+                  if (k>0) { printf "%s    {\n      \"domain_keyword\": [\n", (first?"":",\n"); for(i=1;i<=k;i++) printf "        %s%s\n", keywords[i], (i<k?",":""); printf "      ]\n    }"; first=0; }
+                  if (r>0) { printf "%s    {\n      \"domain_regex\": [\n", (first?"":",\n"); for(i=1;i<=r;i++) printf "        %s%s\n", regexes[i], (i<r?",":""); printf "      ]\n    }"; first=0; }
+                  if (c>0) { printf "%s    {\n      \"ip_cidr\": [\n", (first?"":",\n"); for(i=1;i<=c;i++) printf "        %s%s\n", cidrs[i], (i<c?",":""); printf "      ]\n    }"; first=0; }
+                  if (sc>0) { printf "%s    {\n      \"source_ip_cidr\": [\n", (first?"":",\n"); for(i=1;i<=sc;i++) printf "        %s%s\n", scidrs[i], (i<sc?",":""); printf "      ]\n    }"; first=0; }
+                  if (asn>0) { printf "%s    {\n      \"ip_asn\": [\n", (first?"":",\n"); for(i=1;i<=asn;i++) printf "        %s%s\n", asns[i], (i<asn?",":""); printf "      ]\n    }"; first=0; }
+                  if (p>0) { printf "%s    {\n      \"port\": [\n", (first?"":",\n"); for(i=1;i<=p;i++) printf "        %s%s\n", ports[i], (i<p?",":""); printf "      ]\n    }"; first=0; }
+                  if (sp>0) { printf "%s    {\n      \"source_port\": [\n", (first?"":",\n"); for(i=1;i<=sp;i++) printf "        %s%s\n", sports[i], (i<sp?",":""); printf "      ]\n    }"; first=0; }
+                  if (pn>0) { printf "%s    {\n      \"process_name\": [\n", (first?"":",\n"); for(i=1;i<=pn;i++) printf "        %s%s\n", pnames[i], (i<pn?",":""); printf "      ]\n    }"; first=0; }
+                  if (pp>0) { printf "%s    {\n      \"process_path\": [\n", (first?"":",\n"); for(i=1;i<=pp;i++) printf "        %s%s\n", ppaths[i], (i<pp?",":""); printf "      ]\n    }"; first=0; }
+                  if (nw>0) { printf "%s    {\n      \"network\": [\n", (first?"":",\n"); for(i=1;i<=nw;i++) printf "        %s%s\n", nets[i], (i<nw?",":""); printf "      ]\n    }"; first=0; }
+                  
+                  printf "\n  ]\n}\n";
+              }' "$file" > "singbox_json/${category}.json"
           done
 
       - name: Output JSON and YAML
