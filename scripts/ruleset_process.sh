@@ -31,7 +31,7 @@ format_ruleset_no_cidr() {
             }
             next;
         }
-        /^DOMAIN|^PROCESS-NAME/ {
+        /^(DOMAIN|DOMAIN-SUFFIX|DOMAIN-KEYWORD|IP-CIDR|IP-CIDR6|IP-ASN|DST-PORT|SRC-PORT|SRC-IP-CIDR|PROCESS-NAME|PROCESS-PATH|NETWORK),/ {
             print $1 "," $2;
             next;
         }
@@ -195,13 +195,18 @@ dedupe_classical_to_clash_domain(){
 
 ruleset_sort(){
     awk '
-        /^DOMAIN,/          { print "0 " $0; next }
-        /^DOMAIN-SUFFIX,/   { print "1 " $0; next }
-        /^DOMAIN-KEYWORD,/  { print "2 " $0; next }
-        /^DOMAIN-WILDCARD,/ { print "3 " $0; next }
-        /^DOMAIN-REGEX,/    { print "4 " $0; next }
-        /^IP-CIDR,/         { print "5 " $0; next }
-        /^IP-CIDR6,/        { print "6 " $0; next }
-        /^PROCESS-NAME,/    { print "7 " $0; next }
+        /^DOMAIN,/          { print "01 " $0; next }
+        /^DOMAIN-SUFFIX,/   { print "02 " $0; next }
+        /^DOMAIN-KEYWORD,/  { print "03 " $0; next }
+        /^DOMAIN-REGEX,/    { print "04 " $0; next }
+        /^IP-CIDR,/         { print "05 " $0; next }
+        /^IP-CIDR6,/        { print "06 " $0; next }
+        /^SRC-IP-CIDR,/     { print "07 " $0; next }
+        /^IP-ASN,/          { print "08 " $0; next }
+        /^DST-PORT,/        { print "09 " $0; next }
+        /^SRC-PORT,/        { print "10 " $0; next }
+        /^NETWORK,/         { print "11 " $0; next }
+        /^PROCESS-NAME,/    { print "12 " $0; next }
+        /^PROCESS-PATH,/    { print "13 " $0; next }
     ' $1 | sort -k1,1n -k2,2 | cut -d' ' -f2-
 }
