@@ -30,21 +30,49 @@ jobs:
 
       - name: Download Upstream Rules (Domains)
         run: |
-          curl -fsSL "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt" > download_proxy.txt
-          curl -fsSL "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/direct-list.txt" > download_cn.txt
-          curl -fsSL "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/reject-list.txt" > download_reject.txt
-          curl -fsSL "https://raw.githubusercontent.com/privacy-protection-tools/anti-AD/master/anti-ad-domains.txt" >> download_reject.txt
-          curl -fsSL "https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/apple.china.conf" > download_apple_raw.txt
+          mkdir -p process temp
           
-          for cat in proxy cn reject; do
+          extract_standard() {
+              grep -E "^(DOMAIN|DOMAIN-SUFFIX|DOMAIN-KEYWORD|DOMAIN-REGEX|IP-CIDR|IP-CIDR6|IP-ASN|DST-PORT|PROCESS-NAME)," "$1" || true
+          }
+
+          extract_v2ray() {
               awk '
-                  /^full:/   { sub(/^full:/, "DOMAIN,"); print; next }
-                  /^regexp:/ { sub(/^regexp:/, "DOMAIN-REGEX,"); print; next }
-                  /^\w/ { print "DOMAIN-SUFFIX," $0 }
-              ' "download_${cat}.txt" > "process/${cat}.list"
-          done
+                  /^full:/ {sub(/^full:/, "DOMAIN,"); print; next}
+                  /^regexp:/ {sub(/^regexp:/, "DOMAIN-REGEX,"); print; next}
+                  /^keyword:/ {sub(/^keyword:/, "DOMAIN-KEYWORD,"); print; next}
+                  /^[a-zA-Z0-9]/ {print "DOMAIN-SUFFIX," $0}
+              ' "$1" || true
+          }
           
-          awk -F/ '/^server=\// {print "DOMAIN-SUFFIX," $2}' download_apple_raw.txt > process/apple-cn.list
+          echo "拉取并融合上游规则"
+
+          curl -fsSL "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/direct-list.txt" > temp/cn1_raw.txt
+          curl -fsSL "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/ChinaMax/ChinaMax.list" > temp/cn2_raw.txt
+          extract_v2ray temp/cn1_raw.txt > temp/cn1.list
+          extract_standard temp/cn2_raw.txt > temp/cn2.list
+          cat temp/cn1.list temp/cn2.list > process/cn.list
+
+          curl -fsSL "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt" > temp/proxy1_raw.txt
+          curl -fsSL "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Global/Global.list" > temp/proxy2_raw.txt
+          extract_v2ray temp/proxy1_raw.txt > temp/proxy1.list
+          extract_standard temp/proxy2_raw.txt > temp/proxy2.list
+          cat temp/proxy1.list temp/proxy2.list > process/proxy.list
+
+          curl -fsSL "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/reject-list.txt" > temp/reject1_raw.txt
+          curl -fsSL "https://raw.githubusercontent.com/privacy-protection-tools/anti-AD/master/anti-ad-clash.yaml" > temp/reject2_raw.txt
+          extract_v2ray temp/reject1_raw.txt > temp/reject1.list
+          extract_standard temp/reject2_raw.txt > temp/reject2.list
+          cat temp/reject1.list temp/reject2.list > process/reject.list
+
+          curl -fsSL "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Apple/Apple.list" > temp/apple1_raw.txt
+          curl -fsSL "https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/apple.china.conf" > temp/apple2_raw.txt
+          extract_standard temp/apple1_raw.txt > temp/apple1.list
+          awk -F/ '/^server=/ {print "DOMAIN-SUFFIX," $2}' temp/apple2_raw.txt > temp/apple2.list
+          cat temp/apple1.list temp/apple2.list > process/apple-cn.list
+
+          rm -rf temp
+          echo "上游规则下载并融合完毕"
 
       - name: Download Upstream Rules (IPs)
         run: |
